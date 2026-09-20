@@ -5,10 +5,23 @@ import {
 } from 'recharts';
 import { calculateScore, formatPrice, formatMileage, getCarClass } from './utils/scoreCalculator';
 import { calcAnnualMileage, formatAnnual } from './utils/usage';
-import { getSegment, getCarsBySegment, getDefaultThresholds } from './utils/segmentation';
+import { getDefaultThresholds } from './utils/segmentation';
 import { linearRegression } from './utils/trendLine';
 import { thinSeries } from './utils/thinPoints.js';
 import { getSupplierConfig } from './utils/brandAssets.jsx';
+import {
+  applyBaseFilters,
+  applySegmentFilters,
+  computeBodyTypes,
+  computePriceByBrand,
+  computeScatterData,
+  computeScatterSeries,
+  computeLowUsage,
+  computeYearVsPrice,
+  computeTopModels,
+  getBestDeals,
+  computeAvgMileage,
+} from './utils/filterPipeline';
 import SegmentFilter from './components/SegmentFilter';
 import PriceHistoryChart from './components/PriceHistoryChart';
 import SourceComparison from './components/SourceComparison.jsx';
@@ -241,36 +254,23 @@ function App() {
     return Math.ceil(Math.max(...cars.map(c => c.price)) / 100000) * 100000;
   }, [cars]);
 
-  const baseFiltered = useMemo(() => {
-    let result = cars;
-    if (sourceFilter !== 'all') result = result.filter(c => c.source === sourceFilter);
-    if (brandFilter !== 'all') result = result.filter(c => c.brand === brandFilter);
-    if (yearFrom !== 'all') result = result.filter(c => c.year >= parseInt(yearFrom));
-    if (yearTo !== 'all') result = result.filter(c => c.year <= parseInt(yearTo));
-    if (classFilter !== 'all') result = result.filter(c => getCarClass(c) === classFilter);
-    if (priceRange) result = result.filter(c => c.price <= priceRange);
-    if (showDealsOnly) result = result.filter(c => c.score > 10);
-    return result;
-  }, [cars, sourceFilter, brandFilter, yearFrom, yearTo, classFilter, priceRange, showDealsOnly]);
+  const baseFiltered = useMemo(() => applyBaseFilters(cars, {
+    source: sourceFilter,
+    brand: brandFilter,
+    yearFrom,
+    yearTo,
+    carClass: classFilter,
+    priceRange,
+    showDealsOnly,
+  }), [cars, sourceFilter, brandFilter, yearFrom, yearTo, classFilter, priceRange, showDealsOnly]);
 
-  const segmentedCars = useMemo(() => {
-    let result = getCarsBySegment(baseFiltered, selectedSegment, thresholds);
-    if (bodyTypeFilter !== 'all') {
-      result = result.filter(c => c.bodyType === bodyTypeFilter);
-    }
-    return result;
-  }, [baseFiltered, selectedSegment, thresholds, bodyTypeFilter]);
+  const segmentedCars = useMemo(() => applySegmentFilters(baseFiltered, {
+    segment: selectedSegment,
+    thresholds,
+    bodyType: bodyTypeFilter,
+  }), [baseFiltered, selectedSegment, thresholds, bodyTypeFilter]);
 
-  const bodyTypes = useMemo(() => {
-    const map = {};
-    baseFiltered.forEach(c => {
-      if (!c.bodyType) return;
-      map[c.bodyType] = (map[c.bodyType] || 0) + 1;
-    });
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'))
-      .map(([bt]) => bt);
-  }, [baseFiltered]);
+  const bodyTypes = useMemo(() => computeBodyTypes(baseFiltered), [baseFiltered]);
 
   useEffect(() => {
     if (bodyTypeFilter !== 'all' && !bodyTypes.includes(bodyTypeFilter)) {
@@ -323,61 +323,11 @@ function App() {
     return pairs.slice(0, 6);
   }, [segmentedCars, metaSources]);
 
-  const priceByBrand = useMemo(() => {
-    const map = {};
-    segmentedCars.forEach(c => {
-      if (!map[c.brand]) map[c.brand] = { brand: c.brand, prices: [], count: 0 };
-      map[c.brand].prices.push(c.price);
-      map[c.brand].count++;
-    });
-    return Object.values(map)
-      .map(d => ({
-        brand: d.brand,
-        avgPrice: Math.round(d.prices.reduce((a, b) => a + b, 0) / d.prices.length),
-        count: d.count,
-      }))
-      .sort((a, b) => b.avgPrice - a.avgPrice)
-      .slice(0, 10);
-  }, [segmentedCars]);
+  const priceByBrand = useMemo(() => computePriceByBrand(segmentedCars), [segmentedCars]);
 
-  const scatterData = useMemo(() => {
-    const pts = segmentedCars
-      .filter(c => c.mileage && c.mileage > 100 && c.mileage < 500000 && c.price > 0)
-      .map(c => ({
-        mileage: c.mileage,
-        price: c.price,
-        brand: c.brand,
-        name: `${c.brand} ${c.model}`,
-        annual: calcAnnualMileage(c),
-      }));
-    const counts = {};
-    pts.forEach(p => { counts[p.brand] = (counts[p.brand] || 0) + 1; });
-    const topBrands = new Set(
-      Object.entries(counts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 7)
-        .map(([b]) => b)
-    );
-    return { topBrands, pts };
-  }, [segmentedCars]);
+  const scatterData = useMemo(() => computeScatterData(segmentedCars), [segmentedCars]);
 
-  const scatterSeries = useMemo(() => {
-    const { topBrands, pts } = scatterData;
-    const groups = {};
-    topBrands.forEach(b => { groups[b] = []; });
-    const other = [];
-    pts.forEach(p => {
-      if (topBrands.has(p.brand)) groups[p.brand].push(p);
-      else other.push(p);
-    });
-    const series = Object.entries(groups).map(([brand, data], i) => ({
-      brand,
-      data,
-      fill: COLORS[i % COLORS.length],
-    }));
-    if (other.length > 0) series.push({ brand: 'Другие', data: other, fill: '#9E9E9E' });
-    return series;
-  }, [scatterData]);
+  const scatterSeries = useMemo(() => computeScatterSeries(scatterData, COLORS), [scatterData]);
 
   const scatterSeriesLimited = useMemo(() => thinSeries(scatterSeries, 2000), [scatterSeries]);
 
@@ -396,56 +346,15 @@ function App() {
       .filter(c => c.annual !== null);
   }, [segmentedCars]);
 
-  const lowUsageCars = useMemo(() => {
-    return lowUsageAll
-      .filter(c => c.annual <= maxAnnual)
-      .sort((a, b) => a.annual - b.annual)
-      .slice(0, 8);
-  }, [lowUsageAll, maxAnnual]);
+  const lowUsageCars = useMemo(() => computeLowUsage(segmentedCars, maxAnnual), [segmentedCars, maxAnnual]);
 
-  const yearVsPrice = useMemo(() => {
-    const map = {};
-    segmentedCars.forEach(c => {
-      if (!c.year) return;
-      if (!map[c.year]) map[c.year] = { year: c.year, prices: [] };
-      map[c.year].prices.push(c.price);
-    });
-    return Object.values(map)
-      .map(d => ({
-        year: d.year,
-        avgPrice: Math.round(d.prices.reduce((a, b) => a + b, 0) / d.prices.length),
-        count: d.prices.length,
-      }))
-      .sort((a, b) => a.year - b.year);
-  }, [segmentedCars]);
+  const yearVsPrice = useMemo(() => computeYearVsPrice(segmentedCars), [segmentedCars]);
 
-  const topModels = useMemo(() => {
-    const map = {};
-    segmentedCars.forEach(c => {
-      const key = `${c.brand} ${c.model}`;
-      if (!map[key]) map[key] = { name: key, brand: c.brand, model: c.model, count: 0, prices: [], sampleUrl: c.url || null };
-      map[key].count++;
-      map[key].prices.push(c.price);
-    });
-    return Object.values(map)
-      .map(d => ({
-        ...d,
-        avgPrice: Math.round(d.prices.reduce((a, b) => a + b, 0) / d.prices.length),
-        listingUrl: listingUrlFromCarUrl(d.sampleUrl),
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-  }, [segmentedCars]);
+  const topModels = useMemo(() => computeTopModels(segmentedCars), [segmentedCars]);
 
-  const bestDeals = useMemo(() => {
-    return [...segmentedCars].sort((a, b) => b.score - a.score).slice(0, 8);
-  }, [segmentedCars]);
+  const bestDeals = useMemo(() => getBestDeals(segmentedCars), [segmentedCars]);
 
-  const avgMileage = useMemo(() => {
-    const withMileage = segmentedCars.filter(c => c.mileage != null);
-    if (withMileage.length === 0) return null;
-    return Math.round(withMileage.reduce((a, c) => a + c.mileage, 0) / withMileage.length);
-  }, [segmentedCars]);
+  const avgMileage = useMemo(() => computeAvgMileage(segmentedCars), [segmentedCars]);
 
   return (
     <div className="app">
