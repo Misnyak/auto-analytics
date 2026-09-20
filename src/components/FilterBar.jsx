@@ -1,5 +1,7 @@
 import React from 'react';
 
+const SOURCE_LABELS = { 'major-expert': 'Major Auto', rolf: 'Рольф' };
+
 export default function FilterBar({
   brandFilter,
   setBrandFilter,
@@ -18,6 +20,7 @@ export default function FilterBar({
   setShowDealsOnly,
   sourceFilter,
   setSourceFilter,
+  sources = [],
   filteredCount,
   totalCount,
 }) {
@@ -31,8 +34,10 @@ export default function FilterBar({
 
         <div className="filter-bar-controls">
           <div className="filter-group">
-            <label className="filter-label">Марка</label>
+            <label className="filter-label" htmlFor="filter-brand">Марка</label>
             <select
+              id="filter-brand"
+              aria-label="Марка"
               className="filter-select"
               value={brandFilter}
               onChange={e => setBrandFilter(e.target.value)}
@@ -45,8 +50,10 @@ export default function FilterBar({
           </div>
 
           <div className="filter-group">
-            <label className="filter-label">Класс</label>
+            <label className="filter-label" htmlFor="filter-class">Класс</label>
             <select
+              id="filter-class"
+              aria-label="Класс"
               className="filter-select"
               value={classFilter}
               onChange={e => setClassFilter(e.target.value)}
@@ -59,38 +66,40 @@ export default function FilterBar({
           </div>
 
           <div className="filter-group">
-            <label className="filter-label">Год от</label>
+            <label className="filter-label" htmlFor="filter-year-from">Год от</label>
             <select
+              id="filter-year-from"
+              aria-label="Год от"
               className="filter-select"
               value={yearFrom}
               onChange={e => setYearFrom(e.target.value)}
             >
               <option value="all">Любой</option>
-              {[...new Set(Array.from({ length: 2026 - 2014 + 1 }, (_, i) => 2014 + i))].reverse().map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
+              {yearsRange()}
             </select>
           </div>
 
           <div className="filter-group">
-            <label className="filter-label">Год до</label>
+            <label className="filter-label" htmlFor="filter-year-to">Год до</label>
             <select
+              id="filter-year-to"
+              aria-label="Год до"
               className="filter-select"
               value={yearTo}
               onChange={e => setYearTo(e.target.value)}
             >
               <option value="all">Любой</option>
-              {[...new Set(Array.from({ length: 2026 - 2014 + 1 }, (_, i) => 2014 + i))].reverse().map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
+              {yearsRange()}
             </select>
           </div>
 
           <div className="filter-group">
-            <label className="filter-label">
+            <label className="filter-label" htmlFor="filter-price">
               Цена до: {priceRange ? `${(priceRange / 1000000).toFixed(1)}M ₽` : 'Любая'}
             </label>
             <input
+              id="filter-price"
+              aria-label="Цена до"
               type="range"
               className="filter-range"
               min={0}
@@ -102,15 +111,18 @@ export default function FilterBar({
           </div>
 
           <div className="filter-group">
-            <label className="filter-label">Источник</label>
+            <label className="filter-label" htmlFor="filter-source">Источник</label>
             <select
+              id="filter-source"
+              aria-label="Источник"
               className="filter-select"
               value={sourceFilter}
               onChange={e => setSourceFilter(e.target.value)}
             >
-              <option value="all">Все</option>
-              <option value="major">Major Auto</option>
-              <option value="rolf">Рольф</option>
+              <option value="all">Все источники</option>
+              {sources.map(s => (
+                <option key={s} value={s}>{SOURCE_LABELS[s] || s}</option>
+              ))}
             </select>
           </div>
 
@@ -127,4 +139,12 @@ export default function FilterBar({
       </div>
     </div>
   );
+}
+
+function yearsRange() {
+  const now = new Date().getFullYear() + 1;
+  const from = 2014;
+  return Array.from({ length: now - from + 1 }, (_, i) => now - i).map(y => (
+    <option key={y} value={y}>{y}</option>
+  ));
 }
